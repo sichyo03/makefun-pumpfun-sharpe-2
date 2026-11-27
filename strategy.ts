@@ -1,29 +1,34 @@
-// Proven-demand momentum bot for agent-fun/replay/v2 (pump.fun bonding curves).
+// Variance-first proven-demand momentum bot for agent-fun/replay/v2 (pump.fun curves).
 //
 // Thesis: most pump.fun launches die within minutes and naive signals lose to the ~2.5%
-// round-trip curve fees. The one robustly positive family is to wait until a curve is about
-// 100 slots old and only buy when the opening tape already proved broad, heavy demand —
-// many distinct buyers and a large net SOL inflow since creation. The decision is made once,
-// at the first batch at or past that age: coins that have not proved demand by then are
-// dropped for good, because later qualifiers are mostly chasing a price that already ran.
+// round-trip curve fees. The scored metric is hourly Sharpe, and the dev board's winners
+// run max drawdowns of 0.2-0.5% — they optimize the VARIANCE of hourly equity, not raw
+// return. So this bot trades rarely and only on overwhelming evidence: a curve is watched
+// from creation and bought once, at the first batch at/after age 100 slots, only if the
+// opening tape already proved broad, heavy demand — at least 20 distinct non-creator
+// buyers AND at least 30 SOL net inflow since creation. Measured on the dev window, that
+// stricter bar (vs 15 buyers / 20 SOL) cuts round trips from 57 to 35, drops max drawdown
+// from 1.16% to 0.38%, and lifts hourly Sharpe from 0.33 to 0.89: fewer, higher-quality
+// trades keep hourly PnL smooth. Coins that have not proved demand by the decision batch
+// are dropped for good, because later qualifiers are mostly chasing a price that ran.
 // A tight buy-slippage cap refuses fills whose price ran away during the 2-slot latency.
 // Exits are mechanical: take profit at +15% liquidation value over cost, stop at -24%, or
 // leave after 1200 slots. A pacing fallback opens tiny probe round trips only if the
-// 20-mint guardrail count lags.
+// 20-mint guardrail count lags (the final window is 6h, so probes matter there).
 //
 // Pure function of the batches it is fed: no clock, no environment, no randomness, no I/O.
 
 import { BPS, LAMPORTS_PER_SOL, type Batch, type BotState, type OrderInput, type Pubkey } from './vendor/makefun-bot.ts';
 
 // ---- parameters (lamports as bigint where money moves) ----
-const STAKE = LAMPORTS_PER_SOL / 10n; // 0.1 SOL per main entry
+const STAKE = (LAMPORTS_PER_SOL * 12n) / 100n; // 0.12 SOL per main entry
 const MAX_EXPOSURE = (LAMPORTS_PER_SOL * 6n) / 10n; // 0.6 SOL across all open positions + pending buys
 const MIN_BUY = LAMPORTS_PER_SOL / 100n; // 0.01 SOL: the guardrail's round-trip minimum buy
 const PROBE_BUY = (LAMPORTS_PER_SOL * 11n) / 1000n; // 0.011 SOL probe round trips
 const MIN_AGE = 100; // slots after create: the decision batch (first batch at or past this age)
 const MAX_AGE = 300; // slots after create: capacity-blocked retries stop here
-const MIN_BUYERS = 15; // distinct non-creator buyers since creation
-const MIN_NET_INFLOW = LAMPORTS_PER_SOL * 20n; // 20 SOL net inflow since creation
+const MIN_BUYERS = 20; // distinct non-creator buyers since creation
+const MIN_NET_INFLOW = LAMPORTS_PER_SOL * 30n; // 30 SOL net inflow since creation
 const BUY_SLIPPAGE_BPS = 300; // refuse fills that ran more than 3% in the latency
 const SELL_SLIPPAGE_BPS = 10_000; // exits always fill
 const TAKE_PROFIT_BPS = 1_500; // +15% liquidation value over cost

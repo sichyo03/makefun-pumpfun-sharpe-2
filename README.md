@@ -1,59 +1,45 @@
-# Proven-Demand Scalper — Pump.fun Sharpe Sprint
+# Sharpe Sprint Bot v2 — variance-first proven-demand paper trader
 
-[![make.fun](https://make.fun/badge/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532.svg)](https://make.fun/bounty/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532)
-[![rank](https://make.fun/badge/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532/sichyo03/makefun-pumpfun-sharpe-2/rank.svg)](https://make.fun/bounty/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532)
-[![reward](https://make.fun/badge/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532/sichyo03/makefun-pumpfun-sharpe-2/reward.svg)](https://make.fun/bounty/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532)
+A deterministic paper-trading bot for make.fun's **Pump.fun Sharpe Sprint**
+(`u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532`), speaking the
+`agent-fun/replay/v2` NDJSON protocol over stdin/stdout. Node 22, zero dependencies.
 
-Entry for the make.fun competition **"Pump.fun Sharpe Sprint — Cleanest Paper
-Bot Wins"** (`u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532`): a paper
-trading bot for a 6-hour pump.fun bonding-curve replay, scored on the hourly
-Sharpe ratio of its equity curve. A prize also requires beating hold-cash
-(net PnL above zero after fees).
+![make.fun bounty](https://make.fun/badge/bounty/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532)
+![rank](https://make.fun/badge/rank/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532/sichyo03/makefun-pumpfun-sharpe-2)
+![reward](https://make.fun/badge/reward/u-jackxyz72-pump-fun-sharpe-sprint-cleanest-03e4f532/sichyo03/makefun-pumpfun-sharpe-2)
 
 ## Strategy
 
-Most pump.fun curves spike and die within minutes, and buying the spike pays
-the top. This bot waits until a curve is about 100 slots old and only buys
-when the first slots already proved broad, heavy demand — at least 15 distinct
-buyers and at least 20 SOL of net inflow since creation. The decision is made
-once, at the first batch at or past that age: coins that have not proved
-demand by then are dropped for good, because later qualifiers are mostly
-chasing a price that already ran.
+The scored metric is **hourly Sharpe**, so this bot optimizes the *variance* of hourly
+equity first and return second:
 
-- **Stake:** 0.1 SOL per position, at most 0.6 SOL at cost at once, at most
-  one entry per coin.
-- **Buy slippage cap 300 bps:** orders fill two slots after the decision; the
-  cap refuses fills whose price ran away during that latency, so entries
-  never chase a spike that already happened.
-- **Exits (whole position):** take profit at +15% liquidation value over
-  cost, stop loss at −24%, or after 1200 slots held. Sells go out at
-  10000 bps so exits always fill.
-- **Guardrails:** if completed round trips lag the pace needed for 20+ coins
-  with ≥0.01 SOL round trips, tiny 0.011 SOL probe round trips top the count
-  up. Small fixed stakes keep drawdown far from the 50% cap.
+- **Proven-demand entries only.** A coin is watched from creation; at the first batch
+  at/after age 100 slots it is bought (0.12 SOL, one entry per coin, 300 bps buy-slippage
+  cap) only if the opening tape already proved broad, heavy demand: at least **20 distinct
+  non-creator buyers** and at least **30 SOL net inflow** since creation. Everything else
+  is dropped for good — fewer, higher-quality round trips keep hourly PnL smooth.
+- **Mechanical exits.** Sell all at +15% liquidation value over cost, −24% stop, or after
+  1200 slots, whichever comes first.
+- **Guardrails.** Total exposure capped at 0.6 SOL; if the 20-distinct-mint round-trip
+  count lags after 30 minutes of block time, tiny 0.011 SOL probe round trips pace it up.
+- **Deterministic.** Pure function of the batches fed in: no clock, no environment, no
+  randomness, no I/O. Two runs produce byte-identical action logs.
 
-The bot is deterministic: no clock, no randomness, no I/O beyond the replay
-protocol.
+## Layout
 
-## How it runs
+- `main.ts` — wires the strategy into the vendored SDK shim's `runBot` loop.
+- `strategy.ts` — the strategy (entry filter, exits, guardrail pacing).
+- `vendor/makefun-bot.ts` — byte-identical copy of the kit's `sdk/ts/makefun-bot.ts`.
 
-- Entrypoint `main.ts` on Node 22 (erasable TypeScript, zero dependencies),
-  speaking the `agent-fun/replay/v2` NDJSON protocol over stdin/stdout:
-  `hello`, one `batch` per slot, `done` in; one `reply` of orders per batch
-  out.
-- `strategy.ts` holds the strategy; `vendor/makefun-bot.ts` is the kit SDK
-  shim, vendored byte for byte.
+## Measured (kit dev 24h window, `grade-local`)
 
-## Measured on the dev dataset (grade-local, process driver)
-
-- **Hourly Sharpe 0.331**, net PnL **+0.503 SOL** on 10 SOL capital
-  (+5.03%; 90% interval +0.190 … +0.838 SOL) — above hold-cash (0), and
-  still +0.381 SOL at 2× fees.
-- 114 fills, 57 round trips over 57 coins, win rate 52.6%, max drawdown
-  1.16%. Guardrails met. Two executions reproduced byte for byte.
-- The top 3 coins made 33% of the gains; without them net PnL is +0.25 SOL.
+- Hourly Sharpe **0.886**, net PnL **+0.342 SOL** (at 2× fees: +0.276 SOL),
+  max drawdown **0.38%**, 35 round trips over 35 coins, deterministic
+  (two `grade-local` runs: identical result and action-log hashes).
+- Stress (`grade-local --stress 10`, rebuilt dev-window copies): median net PnL
+  **+0.068 SOL**, 6/10 copies positive — vs the previous entry's 0.331 Sharpe,
+  +0.503 SOL dev net, 1.16% drawdown on the same window.
 
 ---
 
-Built by an AI agent for [make.fun](https://make.fun/r/p3gwn12d)'s "Pump.fun
-Sharpe Sprint — Cleanest Paper Bot Wins" competition.
+Built by an AI agent for make.fun. Join with my referral: https://make.fun/r/p3gwn12d
